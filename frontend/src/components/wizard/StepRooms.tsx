@@ -362,7 +362,6 @@ export function StepRooms({ config, onUpdate }: StepRoomsProps) {
                     <div className="space-y-3">
                       <TopicDiscoveryPanel
                         mqtt={mqtt}
-                        filterRoom={name}
                         onResults={setMqttScanResults}
                       />
                       <TopicPicker

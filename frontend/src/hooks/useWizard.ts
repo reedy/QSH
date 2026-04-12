@@ -3,6 +3,7 @@ import { apiUrl } from '../lib/api'
 import type { ValidationResponse, DeployResponse, QshConfigYaml } from '../types/config'
 
 const HA_STEPS = [
+  'restore_backup',
   'welcome',
   'telemetry_agreement',
   'connection_method',
@@ -18,6 +19,7 @@ const HA_STEPS = [
 ] as const
 
 const MQTT_STEPS = [
+  'restore_backup',
   'welcome',
   'telemetry_agreement',
   'connection_method',
@@ -33,7 +35,7 @@ const MQTT_STEPS = [
   'review',
 ] as const
 
-export type WizardStepName = (typeof HA_STEPS)[number] | 'mqtt_broker'
+export type WizardStepName = (typeof HA_STEPS)[number] | 'mqtt_broker' | 'restore_backup'
 
 /** Legacy export for WizardShell step label lookup. */
 export const WIZARD_STEPS = HA_STEPS
@@ -102,7 +104,7 @@ export function useWizard() {
     const currentStepName = steps[state.currentStep] as WizardStepName
 
     // Steps that skip server validation
-    const skipValidation: WizardStepName[] = ['welcome', 'connection_method', 'schedules', 'hot_water']
+    const skipValidation: WizardStepName[] = ['restore_backup', 'welcome', 'connection_method', 'schedules', 'hot_water']
     if (skipValidation.includes(currentStepName)) {
       setState((prev) => ({
         ...prev,
@@ -162,6 +164,7 @@ export function useWizard() {
 
   const stepLabels = useMemo(() => {
     const labels: Record<string, string> = {
+      restore_backup: 'Restore',
       welcome: 'Welcome',
       telemetry_agreement: 'Data Sharing',
       connection_method: 'Connection',

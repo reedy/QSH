@@ -7,19 +7,19 @@ describe('useWizard', () => {
     vi.restoreAllMocks()
   })
 
-  it('defaults to HA branch with 12 steps', () => {
+  it('defaults to HA branch with 13 steps', () => {
     const { result } = renderHook(() => useWizard())
-    expect(result.current.totalSteps).toBe(12)
-    expect(result.current.stepName).toBe('welcome')
+    expect(result.current.totalSteps).toBe(13)
+    expect(result.current.stepName).toBe('restore_backup')
   })
 
   it('HA branch step sequence skips MQTT Broker', () => {
     const { result } = renderHook(() => useWizard())
     expect(result.current.steps).not.toContain('mqtt_broker')
-    expect(result.current.totalSteps).toBe(12)
+    expect(result.current.totalSteps).toBe(13)
   })
 
-  it('MQTT branch includes MQTT Broker step with 13 steps', () => {
+  it('MQTT branch includes MQTT Broker step with 14 steps', () => {
     // Mock validation endpoint
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -33,7 +33,7 @@ describe('useWizard', () => {
       result.current.updateConfig('driver', 'mqtt')
     })
 
-    expect(result.current.totalSteps).toBe(13)
+    expect(result.current.totalSteps).toBe(14)
     expect(result.current.steps).toContain('mqtt_broker')
   })
 
@@ -78,6 +78,6 @@ describe('useWizard', () => {
     })
 
     expect(result.current.stepLabels).toContain('MQTT Broker')
-    expect(result.current.stepLabels).toHaveLength(13)
+    expect(result.current.stepLabels).toHaveLength(14)
   })
 })
