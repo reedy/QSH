@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils'
 export function BackupRestore() {
   const [restoring, setRestoring] = useState(false)
   const [mode, setMode] = useState<'merge' | 'replace'>('merge')
+  const [restoreConfig, setRestoreConfig] = useState(false)
   const [result, setResult] = useState<{ message: string; success: boolean } | null>(null)
   const [confirmReplace, setConfirmReplace] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -28,7 +29,7 @@ export function BackupRestore() {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const resp = await fetch(apiUrl(`api/backup/restore?mode=${mode}`), {
+      const resp = await fetch(apiUrl(`api/backup/restore?mode=${mode}${restoreConfig ? '&restore_config=true' : ''}`), {
         method: 'POST',
         body: formData,
       })
@@ -124,6 +125,23 @@ export function BackupRestore() {
             </div>
           </label>
         </div>
+
+        <label className="flex items-start gap-2 p-3 rounded-lg border border-[var(--border)] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={restoreConfig}
+            onChange={(e) => setRestoreConfig(e.target.checked)}
+            className="mt-0.5 accent-[var(--accent)]"
+          />
+          <div>
+            <span className="text-sm font-medium text-[var(--text)]">
+              Restore configuration (qsh.yaml)
+            </span>
+            <p className="text-xs text-[var(--text-muted)]">
+              Enable when migrating to a new installation. Overwrites current config.
+            </p>
+          </div>
+        </label>
 
         {mode === 'replace' && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--red)]/10 border border-[var(--red)]/30">

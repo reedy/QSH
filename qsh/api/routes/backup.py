@@ -8,6 +8,8 @@ import copy
 from io import BytesIO
 from zipfile import ZipFile
 
+import yaml
+
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 
@@ -65,6 +67,7 @@ def export_backup():
 async def restore_backup(
     file: UploadFile = File(...),
     mode: str = Query("merge"),
+    restore_config: bool = Query(False),
 ):
     """Restore from a backup ZIP.
 
@@ -72,7 +75,9 @@ async def restore_backup(
       - 'merge': Keep best per-room sysid observations (non-destructive).
       - 'replace': Full overwrite of state files. DESTRUCTIVE.
 
-    Does NOT overwrite qsh.yaml in either mode.
+    Optional restore_config=true: also restores qsh.yaml from the backup.
+    Use when migrating to a new addon installation. Default: False (config untouched).
+    Validates YAML syntax before writing — returns 400 if malformed.
     """
     if mode not in ("merge", "replace"):
         raise HTTPException(status_code=400, detail="Mode must be 'merge' or 'replace'")
@@ -84,6 +89,26 @@ async def restore_backup(
         raise HTTPException(status_code=400, detail="Invalid ZIP file")
 
     restored = []
+
+    # Restore qsh.yaml first (migration mode) — config must land before state
+    if restore_config and "qsh.yaml" in zf.namelist():
+        yaml_bytes = zf.read("qsh.yaml")
+        # Validate YAML before writing — malformed config would crash-loop the addon
+        try:
+            yaml.safe_load(yaml_bytes)
+        except yaml.YAMLError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"qsh.yaml in backup is not valid YAML: {e}",
+            )
+        target = _find_file(STATE_FILES["qsh.yaml"])
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as f:
+            f.write(yaml_bytes)
+        restored.append("qsh.yaml")
+        logger.info("Restore: wrote qsh.yaml (migration mode) to %s", target)
+    elif restore_config:
+        logger.warning("Restore: restore_config=true but qsh.yaml not found in backup ZIP")
 
     if mode == "replace":
         for filename in ("sysid_state.json", "qsh_state.json", "schedule_state.json"):
@@ -112,7 +137,6 @@ async def restore_backup(
                 # Try to read current qsh.yaml config rooms
                 for yaml_path in STATE_FILES.get("qsh.yaml", []):
                     if os.path.isfile(yaml_path):
-                        import yaml
                         with open(yaml_path) as yf:
                             cfg = yaml.safe_load(yf) or {}
                         config_rooms = set(cfg.get("rooms", {}).keys())

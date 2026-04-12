@@ -1,5 +1,6 @@
 import { useWizard } from '../hooks/useWizard'
 import { WizardShell } from '../components/wizard/WizardShell'
+import { StepRestoreBackup } from '../components/wizard/StepRestoreBackup'
 import { StepWelcome } from '../components/wizard/StepWelcome'
 import { StepConnectionMethod } from '../components/wizard/StepConnectionMethod'
 import { StepHeatSource } from '../components/wizard/StepHeatSource'
@@ -36,6 +37,12 @@ export function Wizard({ onComplete, onExit }: WizardProps) {
 
   const renderStep = () => {
     switch (wizard.stepName) {
+      case 'restore_backup':
+        return (
+          <StepRestoreBackup
+            onSkip={() => wizard.next()}
+          />
+        )
       case 'welcome':
         return (
           <StepWelcome
