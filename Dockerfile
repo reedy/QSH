@@ -111,4 +111,4 @@ import qsh.api; \
 print('T-13 production-layout import smoke test PASS')"
 
 EXPOSE 9100
-CMD ["python", "-m", "qsh.main"]
+CMD ["python", "-m", "qsh"]
