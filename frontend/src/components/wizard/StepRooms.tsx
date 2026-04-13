@@ -4,7 +4,7 @@ import { EntityPicker } from './EntityPicker'
 import { TopicPicker } from './TopicPicker'
 import { TopicDiscoveryPanel } from './TopicDiscoveryPanel'
 import { useRoomEntityScan } from '../../hooks/useEntityScan'
-import { FACING_OPTIONS, type RoomConfigYaml, type MqttConfig, type MqttTopicCandidate, type QshConfigYaml } from '../../types/config'
+import { FACING_OPTIONS, type RoomConfigYaml, type RoomMqttTopicValue, type MqttConfig, type MqttTopicCandidate, type QshConfigYaml } from '../../types/config'
 
 interface StepRoomsProps {
   config: Partial<QshConfigYaml>
@@ -104,10 +104,26 @@ export function StepRooms({ config, onUpdate }: StepRoomsProps) {
     updateRoom(roomName, { trv_entity: arr })
   }
 
-  const updateRoomMqttTopic = (roomName: string, key: string, value: string) => {
+  /** Extract the topic string from a RoomMqttTopicValue (string or object). */
+  const getRoomTopicStr = (val: RoomMqttTopicValue | undefined): string =>
+    !val ? '' : typeof val === 'string' ? val : val.topic || ''
+  const getRoomTopicFormat = (val: RoomMqttTopicValue | undefined): 'plain' | 'json' | undefined =>
+    val && typeof val === 'object' ? val.format : undefined
+  const getRoomTopicJsonPath = (val: RoomMqttTopicValue | undefined): string | undefined =>
+    val && typeof val === 'object' ? val.json_path : undefined
+
+  const updateRoomMqttTopic = (roomName: string, key: string, value: string, format?: string, jsonPath?: string) => {
     const room = rooms[roomName]
     const topics = room.mqtt_topics || { room_temp: '' }
-    updateRoom(roomName, { mqtt_topics: { ...topics, [key]: value || undefined } })
+    let topicValue: RoomMqttTopicValue | undefined
+    if (value) {
+      if (format === 'json') {
+        topicValue = { topic: value, format: 'json', ...(jsonPath ? { json_path: jsonPath } : {}) }
+      } else {
+        topicValue = value
+      }
+    }
+    updateRoom(roomName, { mqtt_topics: { ...topics, [key]: topicValue } })
   }
 
   const roomNames = Object.keys(rooms)
@@ -366,15 +382,19 @@ export function StepRooms({ config, onUpdate }: StepRoomsProps) {
                       />
                       <TopicPicker
                         label="Room Temperature"
-                        value={room.mqtt_topics?.room_temp || ''}
-                        onChange={(v) => updateRoomMqttTopic(name, 'room_temp', v)}
+                        value={getRoomTopicStr(room.mqtt_topics?.room_temp)}
+                        format={getRoomTopicFormat(room.mqtt_topics?.room_temp)}
+                        jsonPath={getRoomTopicJsonPath(room.mqtt_topics?.room_temp)}
+                        onChange={(v, fmt, jp) => updateRoomMqttTopic(name, 'room_temp', v, fmt, jp)}
                         scanResults={mqttScanResults}
                         required
                       />
                       <TopicPicker
                         label="Valve Position (optional)"
-                        value={room.mqtt_topics?.valve_position || ''}
-                        onChange={(v) => updateRoomMqttTopic(name, 'valve_position', v)}
+                        value={getRoomTopicStr(room.mqtt_topics?.valve_position)}
+                        format={getRoomTopicFormat(room.mqtt_topics?.valve_position)}
+                        jsonPath={getRoomTopicJsonPath(room.mqtt_topics?.valve_position)}
+                        onChange={(v, fmt, jp) => updateRoomMqttTopic(name, 'valve_position', v, fmt, jp)}
                         scanResults={mqttScanResults}
                       />
                       <TopicPicker

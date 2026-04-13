@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from .config import _load_raw_yaml, _save_yaml
+from .config import _read_modify_write
 
 router = APIRouter(tags=["rooms"])
 
@@ -39,17 +39,23 @@ def _signal_restart():
 @router.post("/rooms/{room_name}")
 def add_room(room_name: str, room: RoomConfig):
     """Add a new room to qsh.yaml."""
-    raw = _load_raw_yaml()
-    rooms = raw.setdefault("rooms", {})
-
     if room.emitter_type is not None and room.emitter_type not in VALID_EMITTER_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid emitter_type '{room.emitter_type}'. Valid: {sorted(VALID_EMITTER_TYPES)}")
 
-    if room_name in rooms:
-        raise HTTPException(status_code=409, detail=f"Room '{room_name}' already exists")
+    room_data = room.dict(exclude_none=True)
 
-    rooms[room_name] = room.dict(exclude_none=True)
-    _save_yaml(raw)
+    def transform(raw: dict) -> dict:
+        rooms = raw.setdefault("rooms", {})
+        if room_name in rooms:
+            raise ValueError(f"Room '{room_name}' already exists")
+        rooms[room_name] = room_data
+        return raw
+
+    try:
+        _read_modify_write(transform)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     _signal_restart()
     return {"created": room_name, "restart_required": True}
 
@@ -57,17 +63,23 @@ def add_room(room_name: str, room: RoomConfig):
 @router.put("/rooms/{room_name}")
 def update_room(room_name: str, room: RoomConfig):
     """Update an existing room config."""
-    raw = _load_raw_yaml()
-    rooms = raw.get("rooms", {})
-
     if room.emitter_type is not None and room.emitter_type not in VALID_EMITTER_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid emitter_type '{room.emitter_type}'. Valid: {sorted(VALID_EMITTER_TYPES)}")
 
-    if room_name not in rooms:
-        raise HTTPException(status_code=404, detail=f"Room '{room_name}' not found")
+    room_data = room.dict(exclude_none=True)
 
-    rooms[room_name] = room.dict(exclude_none=True)
-    _save_yaml(raw)
+    def transform(raw: dict) -> dict:
+        rooms = raw.get("rooms", {})
+        if room_name not in rooms:
+            raise KeyError(f"Room '{room_name}' not found")
+        rooms[room_name] = room_data
+        return raw
+
+    try:
+        _read_modify_write(transform)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e).strip("'\""))
+
     _signal_restart()
     return {"updated": room_name, "restart_required": True}
 
@@ -75,13 +87,17 @@ def update_room(room_name: str, room: RoomConfig):
 @router.delete("/rooms/{room_name}")
 def delete_room(room_name: str):
     """Remove a room from config."""
-    raw = _load_raw_yaml()
-    rooms = raw.get("rooms", {})
+    def transform(raw: dict) -> dict:
+        rooms = raw.get("rooms", {})
+        if room_name not in rooms:
+            raise KeyError(f"Room '{room_name}' not found")
+        del rooms[room_name]
+        return raw
 
-    if room_name not in rooms:
-        raise HTTPException(status_code=404, detail=f"Room '{room_name}' not found")
+    try:
+        _read_modify_write(transform)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e).strip("'\""))
 
-    del rooms[room_name]
-    _save_yaml(raw)
     _signal_restart()
     return {"deleted": room_name, "restart_required": True}

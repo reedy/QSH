@@ -352,7 +352,9 @@ function MqttSensors({ config, onUpdate }: StepSensorsProps) {
             key={key}
             label={`${label} (${hint})`}
             value={getInputTopic(key)}
-            onChange={(v) => updateInput(key, v)}
+            format={inputs[key]?.format}
+            jsonPath={inputs[key]?.json_path}
+            onChange={(topic, fmt, jp) => updateInput(key, topic, fmt, jp)}
             scanResults={scanResults}
             required={hint === 'recommended'}
           />
@@ -375,7 +377,9 @@ function MqttSensors({ config, onUpdate }: StepSensorsProps) {
                 key={key}
                 label={label}
                 value={getInputTopic(key)}
-                onChange={(v) => updateInput(key, v)}
+                format={inputs[key]?.format}
+                jsonPath={inputs[key]?.json_path}
+                onChange={(topic, fmt, jp) => updateInput(key, topic, fmt, jp)}
                 scanResults={scanResults}
               />
             ))}
@@ -417,7 +421,9 @@ function MqttSensors({ config, onUpdate }: StepSensorsProps) {
             <TopicPicker
               label="Solar Production"
               value={getInputTopic('solar_production')}
-              onChange={(v) => updateInput('solar_production', v)}
+              format={inputs.solar_production?.format}
+              jsonPath={inputs.solar_production?.json_path}
+              onChange={(topic, fmt, jp) => updateInput('solar_production', topic, fmt, jp)}
               scanResults={scanResults}
             />
           )}
@@ -454,13 +460,17 @@ function MqttSensors({ config, onUpdate }: StepSensorsProps) {
               <TopicPicker
                 label="Battery SoC"
                 value={getInputTopic('battery_soc')}
-                onChange={(v) => updateInput('battery_soc', v)}
+                format={inputs.battery_soc?.format}
+                jsonPath={inputs.battery_soc?.json_path}
+                onChange={(topic, fmt, jp) => updateInput('battery_soc', topic, fmt, jp)}
                 scanResults={scanResults}
               />
               <TopicPicker
                 label="Grid Power"
                 value={getInputTopic('grid_power')}
-                onChange={(v) => updateInput('grid_power', v)}
+                format={inputs.grid_power?.format}
+                jsonPath={inputs.grid_power?.json_path}
+                onChange={(topic, fmt, jp) => updateInput('grid_power', topic, fmt, jp)}
                 scanResults={scanResults}
               />
             </div>

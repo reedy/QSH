@@ -45,20 +45,19 @@ export function SolarBatterySettings({
     setSaving(true)
     setError(null)
 
-    const SECTION_NAMES = ['solar', 'battery', 'grid', 'inverter']
-    const results = await Promise.allSettled([
-      patchOrDelete('solar', hasSolar, solar),
-      patchOrDelete('battery', hasBattery, battery),
-      patchOrDelete('grid', hasBattery, grid),
-      patchOrDelete('inverter', hasSolar, inverter),
-    ])
-
-    const failures = results
-      .map((r, i) => (r.status === 'rejected' ? SECTION_NAMES[i] : null))
-      .filter(Boolean)
-
+    // Save sections sequentially to avoid config race
+    const sections: Array<{ name: string; fn: () => Promise<unknown> }> = [
+      { name: 'solar', fn: () => patchOrDelete('solar', hasSolar, solar) },
+      { name: 'battery', fn: () => patchOrDelete('battery', hasBattery, battery) },
+      { name: 'grid', fn: () => patchOrDelete('grid', hasBattery, grid) },
+      { name: 'inverter', fn: () => patchOrDelete('inverter', hasSolar, inverter) },
+    ]
+    const failures: string[] = []
+    for (const { name, fn } of sections) {
+      try { await fn() } catch { failures.push(name) }
+    }
     if (failures.length > 0) {
-      setError(`Failed to save: ${failures.join(', ')}`)
+      setError(`Failed to save: ${failures.join(', ')}. Please retry.`)
     } else {
       onRefetch()
     }

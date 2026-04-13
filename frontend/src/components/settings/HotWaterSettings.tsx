@@ -84,32 +84,31 @@ export function HotWaterSettings({
     setError(null)
 
     if (!enabled) {
-      // Delete all DHW sections
+      // Delete all DHW sections sequentially to avoid config race
       const SECTIONS = ['hw_plan', 'hw_schedule', 'hw_tank', 'hw_precharge'] as const
-      const results = await Promise.allSettled(
-        SECTIONS.map((s) => patchOrDelete(s, false, {}))
-      )
-      const failures = results
-        .map((r, i) => (r.status === 'rejected' ? SECTIONS[i] : null))
-        .filter(Boolean)
+      const failures: string[] = []
+      for (const s of SECTIONS) {
+        try { await patchOrDelete(s, false, {}) } catch { failures.push(s) }
+      }
       if (failures.length > 0) {
-        setError(`Failed to delete: ${failures.join(', ')}`)
+        setError(`Failed to remove: ${failures.join(', ')}. Please retry.`)
       } else {
         onRefetch()
       }
     } else {
-      const SECTION_NAMES = ['hw_plan', 'hw_schedule', 'hw_tank', 'hw_precharge']
-      const results = await Promise.allSettled([
-        patchOrDelete('hw_plan', true, plan as unknown as Record<string, unknown>),
-        patchOrDelete('hw_schedule', true, schedule),
-        patchOrDelete('hw_tank', true, tank),
-        patchOrDelete('hw_precharge', precharge.enabled === true, precharge),
-      ])
-      const failures = results
-        .map((r, i) => (r.status === 'rejected' ? SECTION_NAMES[i] : null))
-        .filter(Boolean)
+      // Save sections sequentially to avoid config race
+      const sections: Array<{ name: string; fn: () => Promise<unknown> }> = [
+        { name: 'hw_plan', fn: () => patchOrDelete('hw_plan', true, plan as unknown as Record<string, unknown>) },
+        { name: 'hw_schedule', fn: () => patchOrDelete('hw_schedule', true, schedule) },
+        { name: 'hw_tank', fn: () => patchOrDelete('hw_tank', true, tank) },
+        { name: 'hw_precharge', fn: () => patchOrDelete('hw_precharge', precharge.enabled === true, precharge) },
+      ]
+      const failures: string[] = []
+      for (const { name, fn } of sections) {
+        try { await fn() } catch { failures.push(name) }
+      }
       if (failures.length > 0) {
-        setError(`Failed to save: ${failures.join(', ')}`)
+        setError(`Failed to save: ${failures.join(', ')}. Please retry.`)
       } else {
         onRefetch()
       }
