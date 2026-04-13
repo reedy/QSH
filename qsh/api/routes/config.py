@@ -1,13 +1,21 @@
 """Configuration endpoints — read, raw YAML access, section updates, deletion."""
 
 import copy
+import logging
 import os
+import tempfile
+import threading
 import yaml
+from typing import Callable
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..state import shared_state
+
+_yaml_lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -32,26 +40,70 @@ def _find_yaml_path() -> str:
     return YAML_PATH  # Default write path
 
 
-def _load_raw_yaml() -> dict:
-    """Load the raw YAML (not the processed HOUSE_CONFIG)."""
+def _load_raw_yaml():
+    """Load the raw YAML (not the processed HOUSE_CONFIG).
+
+    Returns the parsed dict, or None if the file could not be read/parsed.
+    """
     path = _find_yaml_path()
     try:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
         return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    except Exception as e:
+        logger.error(
+            "Failed to load qsh.yaml from %s: %s — returning None", path, e
+        )
+        return None
 
 
-def _save_yaml(data: dict):
-    """Write config back to qsh.yaml."""
-    path = _find_yaml_path()
+def _atomic_write_yaml(data: dict, path: str) -> None:
+    """Write YAML atomically via temp-file-then-rename. MUST only be called under _yaml_lock.
+
+    mkstemp in same dir ensures os.replace is same-filesystem (atomic on POSIX).
+    """
     yaml_content = yaml.dump(
         data, default_flow_style=False, allow_unicode=True, sort_keys=False
     )
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write(yaml_content)
+    dir_name = os.path.dirname(path)
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(yaml_content)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _read_modify_write(transform: Callable[[dict], dict]) -> dict:
+    """Thread-safe config update: load -> transform -> atomic save.
+
+    The transform function receives the current config dict and returns
+    the modified dict (or the same dict mutated in place). The entire
+    load-transform-save cycle runs under _yaml_lock — no caller can
+    interleave.
+
+    Returns the transformed config dict.
+    """
+    path = _find_yaml_path()
+    with _yaml_lock:
+        raw = _load_raw_yaml()
+        # Guard: if load failed but file exists with content, something is wrong
+        if raw is None and os.path.isfile(path) and os.path.getsize(path) > 0:
+            raise RuntimeError(
+                f"Config file {path} exists ({os.path.getsize(path)} bytes) "
+                f"but _load_raw_yaml returned None — refusing to overwrite"
+            )
+        if raw is None:
+            raw = {}  # File doesn't exist or is empty — start fresh
+        result = transform(raw)
+        _atomic_write_yaml(result, path)
+    return result
 
 
 def _restore_redacted(existing: dict, incoming: dict) -> dict:
@@ -94,7 +146,7 @@ def get_raw_config():
     Used by settings screens to show the editable YAML structure.
     Sensitive fields are redacted.
     """
-    raw = _load_raw_yaml()
+    raw = _load_raw_yaml() or {}
     return _redact_config(raw)
 
 
@@ -134,7 +186,6 @@ def patch_config_section(section: str, body: dict):
     if section not in valid_sections:
         raise HTTPException(status_code=400, detail=f"Invalid section: {section}")
 
-    raw = _load_raw_yaml()
     incoming = body.get("data", body)
 
     # "root" section merges individual keys at the YAML root level
@@ -148,30 +199,35 @@ def patch_config_section(section: str, body: dict):
             "pid_target_internal",
             "dfan_control_internal",
         }
-        if isinstance(incoming, dict):
-            for key, value in incoming.items():
-                if key in _ROOT_ALLOWED:
-                    raw[key] = value
-                    # Also update in-memory config
-                    config = shared_state.get_config()
-                    if config is not None:
-                        config[key] = value
-        _save_yaml(raw)
+
+        def _apply_root(raw: dict) -> dict:
+            if isinstance(incoming, dict):
+                for key, value in incoming.items():
+                    if key in _ROOT_ALLOWED:
+                        raw[key] = value
+                        # Also update in-memory config
+                        config = shared_state.get_config()
+                        if config is not None:
+                            config[key] = value
+            return raw
+
+        _read_modify_write(_apply_root)
         return {
             "updated": "root",
             "restart_required": False,
             "message": "Root config keys updated",
         }
 
-    existing_section = raw.get(section, {})
+    def _apply_patch(raw: dict) -> dict:
+        existing_section = raw.get(section, {})
+        # Restore redacted fields so secrets aren't overwritten with the sentinel
+        if isinstance(existing_section, dict) and isinstance(incoming, dict):
+            raw[section] = _restore_redacted(existing_section, incoming)
+        else:
+            raw[section] = incoming
+        return raw
 
-    # Restore redacted fields so secrets aren't overwritten with the sentinel
-    if isinstance(existing_section, dict) and isinstance(incoming, dict):
-        raw[section] = _restore_redacted(existing_section, incoming)
-    else:
-        raw[section] = incoming
-
-    _save_yaml(raw)
+    _read_modify_write(_apply_patch)
 
     # Always restart to adopt changes
     try:
@@ -207,12 +263,17 @@ def delete_config_section(section: str):
             detail=f"Section '{section}' cannot be deleted (required or non-deletable)",
         )
 
-    raw = _load_raw_yaml()
-    removed = raw.pop(section, None)
-    if removed is None:
-        return {"deleted": section, "was_present": False}
+    removed: list = [None]  # mutable container for closure write-back
 
-    _save_yaml(raw)
+    def _apply_delete(raw: dict) -> dict:
+        removed[0] = raw.pop(section, None)
+        return raw
+
+    _read_modify_write(_apply_delete)
+    was_present = removed[0] is not None
+
+    if not was_present:
+        return {"deleted": section, "was_present": False}
 
     structural = {"hw_plan", "hw_schedule", "hw_tank", "hw_precharge"}
     needs_restart = section in structural
@@ -244,7 +305,7 @@ def test_influxdb(req: InfluxTestRequest):
     """Test InfluxDB connectivity and database existence."""
     # If password is redacted, load real one from YAML
     if req.password == REDACTED_SENTINEL:
-        raw = _load_raw_yaml()
+        raw = _load_raw_yaml() or {}
         req.password = raw.get("historian", {}).get("password", "")
 
     try:

@@ -22,9 +22,11 @@ export interface MqttConfig {
   }
 }
 
+export type RoomMqttTopicValue = string | MqttTopicInput
+
 export interface RoomMqttTopics {
-  room_temp: string
-  valve_position?: string
+  room_temp: RoomMqttTopicValue
+  valve_position?: RoomMqttTopicValue
   valve_setpoint?: string
   trv_setpoint?: string
   occupancy_sensor?: string

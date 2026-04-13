@@ -282,16 +282,16 @@ def set_away_mode(body: dict):
 
         # 2. Persist to YAML (survives restart)
         try:
-            from .config import _load_raw_yaml, _save_yaml
+            from .config import _read_modify_write
 
-            raw = _load_raw_yaml()
-            if raw.get("rooms"):
+            def _apply_away(raw: dict) -> dict:
+                if not raw.get("rooms"):
+                    return raw
                 raw["away_active_internal"] = active
                 if days is not None:
                     raw["away_days_internal"] = float(days)
-                _save_yaml(raw)
-            else:
-                logger.warning("Skipping YAML persist: loaded config has no rooms")
+                return raw
+            _read_modify_write(_apply_away)
         except Exception as e:
             logger.warning("Failed to persist away state: %s", e)
 

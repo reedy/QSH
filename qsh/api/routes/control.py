@@ -7,13 +7,14 @@ All write endpoints are config-based and work on all drivers.
 import os
 import logging
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..state import shared_state
+from .config import _read_modify_write
 from qsh.occupancy.comfort_schedule import get_comfort_schedule_store
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,25 @@ def _get_entity(entity_id: str, default=None):
     return default
 
 
+def _update_config_key(key_path: str, value) -> Callable[[dict], dict]:
+    """Build a transform that sets a single config key.
+
+    key_path supports dot notation for nested keys:
+    - "comfort_temp" -> raw["comfort_temp"] = value
+    - "antifrost.oat_threshold" -> raw["antifrost"]["oat_threshold"] = value
+    """
+    def transform(raw: dict) -> dict:
+        if not raw.get("rooms"):
+            return raw  # Guard: don't persist to empty/template config
+        parts = key_path.split(".")
+        target = raw
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = value
+        return raw
+    return transform
+
+
 @router.get("")
 def get_control_settings():
     """Return current comfort temperature and control mode.
@@ -139,14 +159,7 @@ def set_antifrost_threshold(body: AntifrostThresholdBody):
 
     # 2. Persist to YAML (survives restart)
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):  # Guard: don't overwrite config if load returned empty/stub
-            raw.setdefault("antifrost", {})["oat_threshold"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms (file unreadable?)")
+        _read_modify_write(_update_config_key("antifrost.oat_threshold", body.value))
     except Exception as e:
         logger.warning("Failed to persist antifrost threshold: %s", e)
 
@@ -184,14 +197,7 @@ def set_comfort_temp(body: ComfortTempBody):
 
     # 2. Persist to YAML (survives restart)
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
-            raw["comfort_temp"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms (file unreadable?)")
+        _read_modify_write(_update_config_key("comfort_temp", body.value))
     except Exception as e:
         logger.warning("Failed to persist comfort_temp: %s", e)
 
@@ -231,14 +237,7 @@ def set_control_mode(body: ControlModeBody):
 
     # 2. Persist to YAML (survives restart)
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):  # Guard: don't overwrite if load returned empty/stub
-            raw["control_enabled"] = body.enabled
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms (file unreadable?)")
+        _read_modify_write(_update_config_key("control_enabled", body.enabled))
     except Exception as e:
         logger.warning("Failed to persist control_enabled: %s", e)
 
@@ -292,14 +291,7 @@ def set_flow_min_internal(body: FlowMinBody):
 
     # Persist to YAML
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
-            raw["flow_min_internal"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms")
+        _read_modify_write(_update_config_key("flow_min_internal", body.value))
     except Exception as e:
         logger.warning("Failed to persist flow_min_internal: %s", e)
 
@@ -338,14 +330,7 @@ def set_flow_max_internal(body: FlowMaxBody):
 
     # Persist to YAML
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
-            raw["flow_max_internal"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms")
+        _read_modify_write(_update_config_key("flow_max_internal", body.value))
     except Exception as e:
         logger.warning("Failed to persist flow_max_internal: %s", e)
 
@@ -376,14 +361,7 @@ def set_pid_target_internal(body: PidTargetBody):
 
     # Persist to YAML
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
-            raw["pid_target_internal"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms")
+        _read_modify_write(_update_config_key("pid_target_internal", body.value))
     except Exception as e:
         logger.warning("Failed to persist pid_target_internal: %s", e)
 
@@ -409,14 +387,7 @@ def set_dfan_control_internal(body: DfanControlBody):
         config["dfan_control_internal"] = body.enabled
 
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
-            raw["control_enabled"] = body.enabled
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms")
+        _read_modify_write(_update_config_key("control_enabled", body.enabled))
     except Exception as e:
         logger.warning("Failed to persist dfan_control_internal: %s", e)
 
@@ -497,15 +468,7 @@ def set_shoulder_threshold(body: ShoulderThresholdBody):
 
     # Persist to qsh.yaml
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):  # Guard: don't overwrite config if load returned empty/stub
-            shoulder = raw.setdefault("shoulder", {})
-            shoulder["hp_min_output_kw"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms (file unreadable?)")
+        _read_modify_write(_update_config_key("shoulder.hp_min_output_kw", body.value))
     except Exception as e:
         logger.warning("Failed to persist shoulder threshold: %s", e)
 
@@ -554,14 +517,7 @@ def set_overtemp_protection(body: OvertempProtectionBody):
 
     # Persist to qsh.yaml
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
-            raw.setdefault("thermal", {})["overtemp_protection"] = body.value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms (file unreadable?)")
+        _read_modify_write(_update_config_key("thermal.overtemp_protection", body.value))
     except Exception as e:
         logger.warning("Failed to persist overtemp protection: %s", e)
 
@@ -631,10 +587,9 @@ def set_external_setpoints(body: ExternalSetpointsBody):
     # because flow_min/max entity registration in config.py reads from heat_source,
     # and changing that would break existing installations.
     try:
-        from .config import _load_raw_yaml, _save_yaml
-
-        raw = _load_raw_yaml()
-        if raw.get("rooms"):
+        def _apply_external_setpoints(raw: dict) -> dict:
+            if not raw.get("rooms"):
+                return raw
             ext_sp = raw.setdefault("external_setpoints", {})
             for key, value in updates.items():
                 if key == "flow_min_temp":
@@ -643,9 +598,8 @@ def set_external_setpoints(body: ExternalSetpointsBody):
                     raw.setdefault("heat_source", {})["flow_max_entity"] = value
                 else:
                     ext_sp[key] = value
-            _save_yaml(raw)
-        else:
-            logger.warning("Skipping YAML persist: loaded config has no rooms")
+            return raw
+        _read_modify_write(_apply_external_setpoints)
     except Exception as e:
         logger.warning("Failed to persist external setpoints: %s", e)
 
