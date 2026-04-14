@@ -126,6 +126,7 @@ _SYSTEM_CONTROL_TOPICS = [
     "control/dfan_control",
     "control/flow_min",
     "control/flow_max",
+    "control/comfort_temp",
 ]
 
 

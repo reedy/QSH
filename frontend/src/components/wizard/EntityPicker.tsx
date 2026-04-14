@@ -128,39 +128,56 @@ export function EntityPicker({
               </button>
             )}
 
-            {filtered.map((candidate, i) => (
-              <button
-                key={candidate.entity_id}
-                onClick={() => {
-                  onChange(candidate.entity_id)
-                  setOpen(false)
-                  setSearch('')
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--bg)] transition-colors text-left"
-              >
-                <span className="w-4 shrink-0">
-                  {value === candidate.entity_id && (
-                    <Check size={14} className="text-[var(--accent)]" />
-                  )}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-[var(--text)] truncate">
-                      {candidate.friendly_name}
-                    </span>
-                    {i === 0 && candidates.length > 0 && (
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--green)]/15 text-[var(--green)] shrink-0">
-                        Suggested
-                      </span>
+            {filtered.map((candidate, i) => {
+              // Auto-highlight only the top-scoring candidate when it is a
+              // high-confidence match. Index 0 is the best after backend's
+              // deterministic (score DESC, entity_id ASC) sort.
+              const isTopSuggestion = i === 0 && candidate.confidence === 'high'
+              return (
+                <button
+                  key={candidate.entity_id}
+                  onClick={() => {
+                    onChange(candidate.entity_id)
+                    setOpen(false)
+                    setSearch('')
+                  }}
+                  aria-selected={isTopSuggestion}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--bg)] transition-colors text-left"
+                >
+                  <span className="w-4 shrink-0">
+                    {value === candidate.entity_id && (
+                      <Check size={14} className="text-[var(--accent)]" />
                     )}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-[var(--text)] truncate">
+                        {candidate.friendly_name}
+                      </span>
+                      {candidate.confidence === 'high' && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 shrink-0">
+                          Recommended
+                        </span>
+                      )}
+                      {candidate.confidence === 'medium' && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 shrink-0">
+                          Likely match
+                        </span>
+                      )}
+                      {candidate.confidence === 'low' && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-500/20 text-slate-600 dark:text-slate-400 shrink-0">
+                          Possible match
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                      <span className="truncate">{candidate.entity_id}</span>
+                      <span>= {candidate.state}{candidate.unit ? ` ${candidate.unit}` : ''}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                    <span className="truncate">{candidate.entity_id}</span>
-                    <span>= {candidate.state}{candidate.unit ? ` ${candidate.unit}` : ''}</span>
-                  </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              )
+            })}
 
             {filtered.length === 0 && (
               <div className="px-3 py-4 text-sm text-[var(--text-muted)] text-center">

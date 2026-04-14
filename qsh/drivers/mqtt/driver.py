@@ -325,8 +325,18 @@ class MQTTDriver:
         )
         self._last_resolved["flow_max"] = flow_max_rv
 
+        comfort_temp_rv = self._resolve_mqtt_control(
+            cache,
+            "control/comfort_temp",
+            "pid_target_internal",
+            default=20.0,
+            validate=lambda s: _validate_range(s, 10.0, 30.0),
+        )
+        self._last_resolved["comfort_temp"] = comfort_temp_rv
+
         # ── Per-room away and comfort_temp from control topics ──
         per_zone_away: Dict[str, float] = {}
+        per_room_comfort: Dict[str, float] = {}
         for room_slug in config.get("rooms", {}):
             room_away_rv = self._resolve_mqtt_control(
                 cache,
@@ -345,12 +355,29 @@ class MQTTDriver:
                 )
                 per_zone_away[room_slug] = room_days_rv.value
 
+            # Per-room comfort override: MQTT cache → room's pid_target_internal
+            # → system comfort_temp (as default). Emitted into the overrides
+            # map only when the resolved value is external OR differs from
+            # the system comfort; otherwise the base target is already correct.
+            room_comfort_rv = self._resolve_mqtt_control(
+                cache,
+                f"control/{room_slug}/comfort_temp",
+                f"room_internals.{room_slug}.pid_target_internal",
+                default=comfort_temp_rv.value,
+                validate=lambda s: _validate_range(s, 10.0, 30.0),
+            )
+            if (
+                room_comfort_rv.source == "external"
+                or room_comfort_rv.value != comfort_temp_rv.value
+            ):
+                per_room_comfort[room_slug] = room_comfort_rv.value
+
         return InputBlock(
             room_temps=room_temps,
             independent_sensors=independent_sensors,
             valve_positions=valve_positions,
             outdoor_temp=system_values.get("outdoor_temp", 5.0),
-            target_temp=config.get("comfort_temp", 20.0),
+            target_temp=comfort_temp_rv.value,
             hp_flow_temp=system_values.get("hp_flow_temp", 35.0),
             hp_return_temp=system_values.get("hp_return_temp", config.get("default_return_temp", 30.0)),
             hp_power=system_values.get("hp_power", 0.0),
@@ -375,6 +402,7 @@ class MQTTDriver:
             away_mode_active=away_rv.value,
             away_days=away_days_rv.value,
             per_zone_away=per_zone_away,
+            per_room_comfort_overrides=per_room_comfort,
             occupancy_sensor_states=occupancy_sensor_states,
             timestamp=now,
         )

@@ -136,16 +136,62 @@ export function StepTariff({ config, onUpdate }: StepTariffProps) {
           </button>
 
           {testResult && (
-            <div
-              className={cn(
-                'flex items-center gap-2 p-3 rounded-lg text-sm',
-                testResult.success
-                  ? 'bg-[var(--green)]/10 text-[var(--green)]'
-                  : 'bg-[var(--red)]/10 text-[var(--red)]'
+            <div className="space-y-2">
+              <div
+                className={cn(
+                  'flex items-center gap-2 p-3 rounded-lg text-sm',
+                  testResult.success
+                    ? 'bg-[var(--green)]/10 text-[var(--green)]'
+                    : 'bg-[var(--red)]/10 text-[var(--red)]'
+                )}
+              >
+                {testResult.success ? <Check size={16} /> : <X size={16} />}
+                <span>{testResult.message}</span>
+              </div>
+
+              {/* Primary import + export informational rows (INSTRUCTION-90E). */}
+              {testResult.success && testResult.tariff_code && (
+                <div className="p-3 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] space-y-2 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-[var(--text-muted)]">Import tariff</span>
+                    <span className="font-mono text-xs text-[var(--text)]">
+                      {testResult.tariff_code}
+                    </span>
+                  </div>
+                  {testResult.export_tariff && (
+                    <div className="flex justify-between gap-2">
+                      <span className="text-[var(--text-muted)]">
+                        Export tariff (informational — QSH does not optimise export)
+                      </span>
+                      <span className="font-mono text-xs text-[var(--text-muted)]">
+                        {testResult.export_tariff}
+                      </span>
+                    </div>
+                  )}
+                  {testResult.additional_import_tariffs
+                    && testResult.additional_import_tariffs.length > 0 && (
+                    <p className="text-xs text-[var(--amber)]">
+                      Multiple import tariffs detected (e.g., Economy 7 day/night).
+                      {' '}Using primary: <span className="font-mono">{testResult.tariff_code}</span>.
+                      {' '}Additional:{' '}
+                      <span className="font-mono">
+                        {testResult.additional_import_tariffs.join(', ')}
+                      </span>
+                      . If this is incorrect, select the correct tariff manually.
+                    </p>
+                  )}
+                </div>
               )}
-            >
-              {testResult.success ? <Check size={16} /> : <X size={16} />}
-              {testResult.message}
+
+              {/* Export-only — actionable error. */}
+              {!testResult.success && testResult.export_tariff && (
+                <div className="p-3 rounded-lg bg-[var(--amber)]/10 border border-[var(--amber)]/30 text-sm text-[var(--amber)]">
+                  Only an export (Outgoing) tariff was found for this account:{' '}
+                  <span className="font-mono">{testResult.export_tariff}</span>.
+                  {' '}QSH optimises import cost. To use QSH, add your import
+                  tariff agreement in the Octopus dashboard and retry.
+                </div>
+              )}
             </div>
           )}
 
