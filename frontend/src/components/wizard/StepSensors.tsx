@@ -14,15 +14,26 @@ interface StepSensorsProps {
   onUpdate: (section: string, data: unknown) => void
 }
 
-const MQTT_SENSOR_FIELDS = [
-  { key: 'outdoor_temp', label: 'Outdoor Temperature', hint: 'recommended' },
-  { key: 'hp_flow_temp', label: 'HP Flow Temperature', hint: 'recommended' },
-  { key: 'hp_return_temp', label: 'HP Return Temperature', hint: 'optional' },
-  { key: 'hp_power', label: 'HP Power Input', hint: 'recommended' },
-  { key: 'hp_cop', label: 'HP COP', hint: 'optional' },
-  { key: 'hp_heat_output', label: 'HP Heat Output', hint: 'optional' },
-  { key: 'hp_mode_state', label: 'HP Mode State', hint: 'optional' },
-  { key: 'flow_rate', label: 'Flow Rate', hint: 'optional' },
+// Core sensors — always visible in the wizard flow.
+const MQTT_CORE_SENSOR_FIELDS = [
+  { key: 'outdoor_temp', label: 'Outdoor Temperature', hint: 'recommended', helper: '' },
+  { key: 'hp_flow_temp', label: 'HP Flow Temperature', hint: 'recommended', helper: '' },
+  { key: 'hp_return_temp', label: 'HP Return Temperature', hint: 'optional', helper: '' },
+  {
+    key: 'flow_rate',
+    label: 'Flow rate sensor',
+    hint: 'optional',
+    helper:
+      'Live flow rate (L/min) improves COP calculation. Leave blank if your heat pump does not expose flow rate.',
+  },
+  { key: 'hp_power', label: 'HP Power Input', hint: 'recommended', helper: '' },
+] as const
+
+// Additional sensors — collapsed by default.
+const MQTT_ADDITIONAL_SENSOR_FIELDS = [
+  { key: 'hp_cop', label: 'HP COP', hint: 'optional', helper: '' },
+  { key: 'hp_heat_output', label: 'HP Heat Output', hint: 'optional', helper: '' },
+  { key: 'hp_mode_state', label: 'HP Mode State', hint: 'optional', helper: '' },
 ] as const
 
 export function StepSensors({ config, onUpdate }: StepSensorsProps) {
@@ -167,13 +178,18 @@ function HaSensors({ config, onUpdate }: StepSensorsProps) {
                 candidates={[]}
               />
             </div>
-            <EntityPicker
-              slot="hp_flow_rate"
-              label="Flow Rate"
-              value={sensors.flow_rate || ''}
-              onChange={(v) => updateSensor('flow_rate', v)}
-              candidates={candidates.hp_flow_rate || []}
-            />
+            <div>
+              <EntityPicker
+                slot="hp_flow_rate"
+                label="Flow rate sensor (optional)"
+                value={sensors.flow_rate || ''}
+                onChange={(v) => updateSensor('flow_rate', v)}
+                candidates={candidates.hp_flow_rate || []}
+              />
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Live flow rate (L/min) improves COP calculation. Leave blank if your heat pump does not expose flow rate.
+              </p>
+            </div>
             <EntityPicker
               slot="hp_water_heater"
               label="Water Heater Entity"
@@ -347,17 +363,21 @@ function MqttSensors({ config, onUpdate }: StepSensorsProps) {
       {/* Core sensors */}
       <div className="space-y-4">
         <h3 className="text-sm font-medium text-[var(--text)]">Core Sensors</h3>
-        {MQTT_SENSOR_FIELDS.slice(0, 4).map(({ key, label, hint }) => (
-          <TopicPicker
-            key={key}
-            label={`${label} (${hint})`}
-            value={getInputTopic(key)}
-            format={inputs[key]?.format}
-            jsonPath={inputs[key]?.json_path}
-            onChange={(topic, fmt, jp) => updateInput(key, topic, fmt, jp)}
-            scanResults={scanResults}
-            required={hint === 'recommended'}
-          />
+        {MQTT_CORE_SENSOR_FIELDS.map(({ key, label, hint, helper }) => (
+          <div key={key}>
+            <TopicPicker
+              label={`${label} (${hint})`}
+              value={getInputTopic(key)}
+              format={inputs[key]?.format}
+              jsonPath={inputs[key]?.json_path}
+              onChange={(topic, fmt, jp) => updateInput(key, topic, fmt, jp)}
+              scanResults={scanResults}
+              required={hint === 'recommended'}
+            />
+            {helper && (
+              <p className="mt-1 text-xs text-[var(--text-muted)]">{helper}</p>
+            )}
+          </div>
         ))}
       </div>
 
@@ -372,7 +392,7 @@ function MqttSensors({ config, onUpdate }: StepSensorsProps) {
         </button>
         {showAdditional && (
           <div className="space-y-4 mt-3">
-            {MQTT_SENSOR_FIELDS.slice(4).map(({ key, label }) => (
+            {MQTT_ADDITIONAL_SENSOR_FIELDS.map(({ key, label }) => (
               <TopicPicker
                 key={key}
                 label={label}

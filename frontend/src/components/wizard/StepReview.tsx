@@ -151,6 +151,14 @@ export function StepReview({
               {Object.keys((mqtt.inputs || {}) as Record<string, unknown>).length === 0 && (
                 <p className="text-sm text-[var(--text-muted)]">No sensor topics configured</p>
               )}
+              {/* Always surface flow_rate so the operator knows the capability
+                  fallback is in effect when empty (INSTRUCTION-90D). */}
+              {!((mqtt.inputs as Record<string, { topic?: string }> | undefined)?.flow_rate?.topic) && (
+                <SummaryItem
+                  label="Flow rate sensor"
+                  value="Not configured (capability fallback)"
+                />
+              )}
             </>
           ) : (
             <>
@@ -161,6 +169,10 @@ export function StepReview({
               <SummaryItem
                 label="Power"
                 value={hs?.sensors?.power_input || 'Not set'}
+              />
+              <SummaryItem
+                label="Flow rate sensor"
+                value={hs?.sensors?.flow_rate || 'Not configured (capability fallback)'}
               />
               <SummaryItem
                 label="Outdoor"

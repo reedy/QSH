@@ -606,7 +606,7 @@ def resolve_external_setpoints(config: Dict) -> None:
     # Snapshot originals on first call only
     if not _setpoint_originals:
         _setpoint_originals = {
-            "comfort_temp": config.get("comfort_temp", 20.0),
+            "comfort_temp": config.get("comfort_temp") or 20.0,
             "antifrost_oat_threshold": config.get("antifrost", {}).get("oat_threshold", 7.0),
             "hp_min_output_kw": config.get("hp_min_output_kw", 2.0),
             "overtemp_protection": config.get("overtemp_protection", 23.0),

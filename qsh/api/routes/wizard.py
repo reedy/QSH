@@ -323,6 +323,25 @@ def _score_entity(entity: Dict, slot: str, room: str = "") -> int:
     return score
 
 
+def _score_to_confidence(score: int) -> str:
+    """Translate raw score to operator-facing confidence label.
+
+    Thresholds are tied to _score_entity weighting (see lines 91-323 of this file).
+    Expected score range per slot (empirically, as of 2026-04-14):
+      - Perfect match (entity_id + friendly_name + device_class + unit all align): 30-55
+      - Strong match (3 of 4 signals): 20-28
+      - Weak match (1-2 signals): 8-15
+      - Below threshold: 0 (filtered out in _scan_for_slot)
+    If _score_entity scoring weights change, re-validate these thresholds
+    against the new maximum possible score.
+    """
+    if score >= 25:
+        return "high"
+    if score >= 15:
+        return "medium"
+    return "low"
+
+
 def _scan_for_slot(
     entities: List[Dict],
     slot: str,
@@ -341,12 +360,15 @@ def _scan_for_slot(
                     "entity_id": eid,
                     "friendly_name": attrs.get("friendly_name", eid),
                     "score": s,
+                    "confidence": _score_to_confidence(s),
                     "state": entity.get("state", "unknown"),
                     "device_class": attrs.get("device_class", ""),
                     "unit": attrs.get("unit_of_measurement", ""),
                 }
             )
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    # Deterministic ordering: primary by score DESC, secondary by entity_id ASC.
+    # Secondary key breaks score ties stably across HA registry iteration order.
+    scored.sort(key=lambda x: (-x["score"], x["entity_id"]))
     return scored[:top_n]
 
 
@@ -575,16 +597,67 @@ def test_octopus(req: OctopusTestRequest):
 
         data = resp.json()
 
-        tariff = "unknown"
+        # Parse properties → meter_points → agreements.
+        # Import meter points have is_export == False (or absent).
+        # Export meter points have is_export == True.
+        # We want the IMPORT tariff, not Outgoing/export.
+        # Collect all import candidates so we can detect and warn on multi-MPAN
+        # setups (e.g., Economy 7 with separate day/night MPANs).
+        import_tariffs: List[str] = []
+        export_tariffs: List[str] = []
         for prop in data.get("properties", []):
-            for meter in prop.get("electricity_meter_points", []):
-                for agreement in meter.get("agreements", []):
-                    tariff = agreement.get("tariff_code", tariff)
+            for mp in prop.get("electricity_meter_points", []):
+                is_export = bool(mp.get("is_export", False))
+                # Octopus API convention: agreements ordered chronologically, latest last.
+                # If the API contract changes, this is the line to inspect.
+                agreements = mp.get("agreements") or []
+                if not agreements:
+                    continue
+                latest = agreements[-1]
+                tariff_code = latest.get("tariff_code")
+                if not tariff_code:
+                    continue
+                if is_export:
+                    export_tariffs.append(tariff_code)
+                else:
+                    import_tariffs.append(tariff_code)
+
+        account_number = data.get("number", account)
+        export_tariff = export_tariffs[0] if export_tariffs else None
+
+        if not import_tariffs:
+            return {
+                "success": False,
+                "message": (
+                    "No import tariff found on this Octopus account. "
+                    "QSH optimises import cost — export-only accounts are not supported. "
+                    "Add your import agreement in the Octopus dashboard and retry."
+                ),
+                "tariff_code": None,
+                "export_tariff": export_tariff,
+                "additional_import_tariffs": [],
+                "account_number": account_number,
+            }
+
+        # Multi-import-meter-point case (Economy 7 day/night MPANs, dual-rate
+        # installs). Take the first import tariff as the primary; surface the
+        # rest so the operator can see the full picture.
+        primary_import = import_tariffs[0]
+        additional_imports = import_tariffs[1:]
+        if additional_imports:
+            logging.warning(
+                "Octopus account %s has %d import meter points: %s. "
+                "Using first (%s). Operator should verify in wizard review.",
+                account_number, len(import_tariffs), import_tariffs, primary_import,
+            )
 
         return {
             "success": True,
-            "message": f"Connected. Tariff: {tariff}",
-            "tariff_code": tariff,
+            "message": f"Connected. Import tariff: {primary_import}",
+            "tariff_code": primary_import,
+            "additional_import_tariffs": additional_imports,
+            "export_tariff": export_tariff,
+            "account_number": account_number,
         }
     except Exception as e:
         return {"success": False, "message": f"Connection failed: {e}"}

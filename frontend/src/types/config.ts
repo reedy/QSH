@@ -291,6 +291,11 @@ export interface EntityCandidate {
   entity_id: string
   friendly_name: string
   score: number
+  /** Operator-facing confidence label derived from `score` in the backend.
+   * high    — near-perfect match (score >= 25), auto-highlighted in the UI.
+   * medium  — likely match (score 15-24).
+   * low     — possible match (score < 15), present but not suggested. */
+  confidence: 'high' | 'medium' | 'low'
   state: string
   device_class: string
   unit: string
@@ -323,11 +328,18 @@ export interface DeployResponse {
   warnings: string[]
 }
 
-/** Response from POST /api/wizard/test-octopus */
+/** Response from POST /api/wizard/test-octopus (INSTRUCTION-90E direction filter). */
 export interface OctopusTestResponse {
   success: boolean
   message: string
-  tariff_code?: string
+  /** Primary import tariff — null when the account has no import meter point. */
+  tariff_code?: string | null
+  /** Extra import tariffs beyond the primary (Economy 7 day/night, dual-MPAN).
+   *  Empty array when the account has a single import meter point. */
+  additional_import_tariffs?: string[]
+  /** Outgoing / export tariff code, informational. null when none. */
+  export_tariff?: string | null
+  account_number?: string
 }
 
 /** Response from POST /api/config/test-influxdb */
