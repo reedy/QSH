@@ -15,6 +15,26 @@ from typing import Any, Dict, List, Optional
 from ...signal_bus import InputBlock, OutputBlock
 
 
+def _read_dfan_control_state(_config: Dict, entity_id: str) -> Optional[bool]:
+    """Read the dfan control HA entity as a tri-state.
+
+    Returns:
+        True  — entity exists and state is 'on'
+        False — entity exists and state is 'off' (or any non-'on' state
+                that is NOT a sentinel below)
+        None  — entity is missing, HA returned no state, or the state is a
+                transient sentinel ('unavailable' / 'unknown'). The resolver
+                interprets None as "fall back to internal key
+                dfan_control_internal". Critical for installs that do not
+                configure the entity at all and for transient HA outages.
+    """
+    from .integration import fetch_ha_entity
+    raw = fetch_ha_entity(entity_id, default=None)
+    if raw is None or raw in ("unavailable", "unknown"):
+        return None
+    return raw == "on"
+
+
 class HADriver:
     """Home Assistant implementation of the IODriver protocol."""
 
@@ -104,7 +124,7 @@ class HADriver:
             entity_key="entities.dfan_control_toggle",
             internal_key="dfan_control_internal",
             default=True,
-            read_fn=lambda cfg, eid: fetch_ha_entity(eid, default=None) == "on",
+            read_fn=_read_dfan_control_state,
         ).value
         # Ensure we have a definite bool (resolve_value may return None if
         # config key is absent and default wasn't used — shouldn't happen, but
