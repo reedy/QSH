@@ -222,10 +222,33 @@ def set_control_mode(body: ControlModeBody):
     Updates in-memory config (takes effect next cycle) and persists to
     qsh.yaml (survives restart). Works on all drivers.
 
-    For HA driver installs: also syncs the change to the dfan_control_toggle
-    HA helper entity so HA automations / dashboards stay in sync.  If the HA
-    service call fails, the yaml write is NOT rolled back (yaml is the source of
-    truth) and the sync is queued for retry on the next pipeline cycle.
+    Sync behaviour:
+      - HA driver with dfan entity configured: writes
+        `entities.dfan_control_toggle` (typically input_boolean.dfan_control)
+        so the HA helper stays in lock-step with the yaml intent. If the
+        service call fails, the yaml write is kept and the sync is queued
+        in pending_ha_syncs; the ShadowController retries on the next cycle.
+      - HA driver without dfan entity configured: no external write. The
+        pipeline's read_inputs() uses resolve_value() with internal key
+        `dfan_control_internal`, which this endpoint also writes. The next
+        cycle picks up the new internal value.
+      - MQTT driver (control_method == "mqtt"): publishes the new value
+        on {prefix}/control/dfan_control with retain=True.
+
+    The yaml write is the source of truth regardless of driver. A failed
+    HA or MQTT sync never rolls back the yaml write; the pipeline
+    reconciles on the next cycle via the resolver.
+
+    Config prerequisites:
+      - Any driver that expects MQTT retained publishes to propagate the
+        toggle MUST set `control_method: mqtt` in qsh.yaml. Without it,
+        `set_control_mode` writes yaml and in-memory config only. The
+        MQTTDriver's internal fallback (dfan_control_internal) picks up
+        the change, but any external MQTT publisher on the
+        {prefix}/control/dfan_control topic will clobber the internal
+        value on its next publish. This is intentional "external wins"
+        semantics; it is not a bug. Set control_method=mqtt if you want
+        the UI to propagate to external MQTT consumers.
     """
     # 1. Update in-memory config (live effect, no restart)
     config = shared_state.get_config()
@@ -241,7 +264,39 @@ def set_control_mode(body: ControlModeBody):
     except Exception as e:
         logger.warning("Failed to persist control_enabled: %s", e)
 
-    # 3. Sync to MQTT (when running via HA with MQTT flow control method)
+    # 3. Sync to HA helper entity (HA driver only; skip MQTT-only installs).
+    # yaml is the source of truth — do NOT roll back the yaml write on HA
+    # service failure.  The failure is recorded in pending_ha_syncs and the
+    # ShadowController retries every cycle until it succeeds (see
+    # qsh/pipeline/controllers/shadow_controller.py:61-83).
+    driver = config.get("driver", "ha") if config is not None else "ha"
+    if driver == "ha":
+        from ...drivers.resolve import deep_get
+        dfan_entity = deep_get(config or {}, "entities.dfan_control_toggle")
+        if dfan_entity:
+            try:
+                _set_entity(dfan_entity, body.enabled)
+            except HTTPException as e:
+                # _set_entity raises HTTPException for HA service failures.
+                # Treat as transient — record for retry.
+                from ...drivers.ha.sync_queue import pending_ha_syncs
+                pending_ha_syncs["dfan_control"] = body.enabled
+                logger.warning(
+                    "dfan_control HA sync failed (%s); queued for retry next cycle",
+                    e.detail,
+                )
+            except Exception:
+                # Defensive — unexpected error path. Use logger.exception so
+                # the stack trace is captured; the HTTPException branch above
+                # uses logger.warning because its `detail` is already a clean
+                # summary and the exception type is expected.
+                from ...drivers.ha.sync_queue import pending_ha_syncs
+                pending_ha_syncs["dfan_control"] = body.enabled
+                logger.exception(
+                    "dfan_control HA sync failed (unexpected); queued for retry next cycle"
+                )
+
+    # 4. Sync to MQTT (when running via HA with MQTT flow control method)
     if config is not None and config.get("control_method") == "mqtt":
         prefix = config.get("mqtt", {}).get("topic_prefix", "")
         topic = f"{prefix}/control/dfan_control" if prefix else "qsh/control/dfan_control"

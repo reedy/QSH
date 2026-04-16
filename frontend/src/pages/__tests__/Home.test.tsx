@@ -106,3 +106,51 @@ describe('Home version footer', () => {
     expect(screen.getByText('QSH vunknown')).toBeInTheDocument()
   })
 })
+
+describe('Home Live/Shadow optimistic toggle', () => {
+  afterEach(() => {
+    mockStatusData = null
+    vi.restoreAllMocks()
+  })
+
+  it('flips the ComfortControl button label immediately when the user toggles to Shadow', async () => {
+    // Initial snapshot: live (control_enabled = true).
+    mockStatusData = { control_enabled: true }
+    // Mock fetch to resolve the POST without actually hitting the network.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ control_enabled: false }), { status: 200 }),
+    )
+
+    render(<Home engineering={false} />)
+
+    // The button starts in "Live" state because the snapshot says so.
+    expect(screen.getByRole('button', { name: /Live/ })).toBeInTheDocument()
+
+    // Click opens the confirmation modal; confirm it.
+    fireEvent.click(screen.getByRole('button', { name: /Live/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Switch to Shadow/ }))
+
+    // Optimistic flip — the button label should now read "Shadow" before the
+    // next snapshot arrives. Use findByRole so React flushes the state update.
+    expect(await screen.findByRole('button', { name: /Shadow/ })).toBeInTheDocument()
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('api/control/mode'),
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('rolls back the optimistic flag when the server returns a non-2xx response', async () => {
+    mockStatusData = { control_enabled: true }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 500 }),
+    )
+
+    render(<Home engineering={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /Live/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Switch to Shadow/ }))
+
+    // After the failed POST, the button should return to "Live" — the
+    // optimistic overlay must not mask a server-side rejection.
+    expect(await screen.findByRole('button', { name: /Live/ })).toBeInTheDocument()
+  })
+})

@@ -46,6 +46,10 @@ export function Home({ engineering, onNavigate }: HomeProps) {
   const { setAway } = useSetAway()
   // Optimistic away-off state — true after "I'm Home" click, clears on server confirm.
   const [optimisticAwayOff, setOptimisticAwayOff] = useState(false)
+  // Optimistic Live/Shadow toggle — holds the user's intended value while the
+  // next 30 s pipeline cycle catches up. Reconciled against the snapshot in the
+  // useEffect below. null = no pending toggle; boolean = pending value.
+  const [optimisticControlEnabled, setOptimisticControlEnabled] = useState<boolean | null>(null)
 
   // Polling ref — typed for setInterval return. Null = no active poll.
   const homePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -96,7 +100,29 @@ export function Home({ engineering, onNavigate }: HomeProps) {
 
   // Derive values for display
   const operatingState = status?.operating_state ?? initial?.operating_state ?? 'Connecting...'
-  const controlEnabled = status?.control_enabled ?? initial?.control_enabled ?? false
+  const snapshotControlEnabled = status?.control_enabled ?? initial?.control_enabled ?? false
+  // Optimistic overlay — show the pending value until the snapshot agrees,
+  // then clear the overlay so genuine server-side disagreements (external
+  // automation flipping the HA helper) surface to the user.
+  const controlEnabled = optimisticControlEnabled ?? snapshotControlEnabled
+
+  // Reconcile optimistic control flag against snapshot. Clear when the
+  // snapshot catches up to the user's intended value.
+  useEffect(() => {
+    if (optimisticControlEnabled !== null && snapshotControlEnabled === optimisticControlEnabled) {
+      setOptimisticControlEnabled(null)
+    }
+  }, [snapshotControlEnabled, optimisticControlEnabled])
+
+  // Failsafe: clear stale optimistic flag after 90 s (3 cycles) so a
+  // broken pipeline does not permanently mask the real control_enabled
+  // value in the UI.
+  useEffect(() => {
+    if (optimisticControlEnabled === null) return
+    const timer = setTimeout(() => setOptimisticControlEnabled(null), 90_000)
+    return () => clearTimeout(timer)
+  }, [optimisticControlEnabled])
+
   const comfortTemp = status?.comfort_temp ?? initial?.comfort_temp ?? 21.0
   const appliedFlow = status?.applied_flow ?? initial?.applied_flow ?? 0
   const appliedMode = status?.applied_mode ?? initial?.applied_mode ?? 'off'
@@ -134,11 +160,23 @@ export function Home({ engineering, onNavigate }: HomeProps) {
   }, [])
 
   const handleControlModeChange = useCallback(async (enabled: boolean) => {
-    await fetch(apiUrl('api/control/mode'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    })
+    // Optimistic flip — user intent is visible instantly. Reconciled via
+    // useEffect when the next snapshot arrives (typically within 30 s).
+    setOptimisticControlEnabled(enabled)
+    try {
+      const resp = await fetch(apiUrl('api/control/mode'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!resp.ok) {
+        // Server rejected the toggle — roll back the optimistic flag so the
+        // UI returns to the snapshot truth rather than showing a lie.
+        setOptimisticControlEnabled(null)
+      }
+    } catch {
+      setOptimisticControlEnabled(null)
+    }
   }, [])
 
   // Flow limits — sourced from config, not WebSocket

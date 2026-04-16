@@ -1,6 +1,7 @@
 """Health check endpoint."""
 
 import json
+import logging
 import time
 from pathlib import Path
 
@@ -12,17 +13,33 @@ router = APIRouter()
 
 
 def _read_addon_version() -> str:
-    try:
-        # routes → api → qsh → quantum_swarm_heating (where config.json lives).
-        # If Nuitka scope expands to include API routes, __file__ resolution
-        # changes silently — re-verify parents[N] at that point.
-        cfg = Path(__file__).resolve().parents[3] / "config.json"
-        return json.loads(cfg.read_text()).get("version", "unknown")
-    except Exception:
-        return "unknown"
+    # COUPLING: this candidate list mirrors the target paths in:
+    #   - quantum_swarm_heating/Dockerfile        (COPY config.json /config.json)
+    #   - quantum_swarm_heating/Dockerfile.public (COPY config.json /app/config.json)
+    # If either Dockerfile is changed, update this list in lockstep, or
+    # the addon will silently fall back to the "unknown" sentinel.
+    candidates = [
+        # Dev mode: quantum_swarm_heating/qsh/api/routes/health.py
+        # parents[3] is the addon source root (where config.json lives).
+        Path(__file__).resolve().parents[3] / "config.json",
+        # Dockerfile.public: qsh/ copied to /app/qsh/, config.json → /app/
+        Path("/app/config.json"),
+        # Dockerfile (local build): qsh/ copied to /qsh, config.json → /
+        Path("/config.json"),
+    ]
+    for cfg in candidates:
+        try:
+            if cfg.is_file():
+                version = json.loads(cfg.read_text()).get("version")
+                if version:
+                    return str(version)
+        except Exception:  # noqa: BLE001 — truly defensive, any failure falls through
+            continue
+    return "unknown"
 
 
 _ADDON_VERSION = _read_addon_version()
+logging.info("health: addon_version=%s", _ADDON_VERSION)
 
 
 @router.get("/health")

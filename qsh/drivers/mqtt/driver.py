@@ -153,6 +153,10 @@ class MQTTDriver:
         self._prefix: str = config.get("mqtt", {}).get("topic_prefix", "")
         self._last_resolved: Dict[str, Any] = {}  # ResolvedValue per control key, for 36C
 
+        # Per-sq_key last observed signal_quality. Seeded on first observation
+        # (no log emitted for the seed); transitions thereafter log exactly once.
+        self._previous_signal_quality: Dict[str, str] = {}
+
         rooms = config.get("rooms", {})
         if not rooms:
             raise ValueError("MQTTDriver: config['rooms'] is empty — need at least one room")
@@ -274,6 +278,50 @@ class MQTTDriver:
             external_raw=None,
         )
 
+    def _log_signal_quality_transition(
+        self,
+        sq_key: str,
+        mapping: TopicMapping,
+        new_quality: str,
+        cache: Dict[str, Tuple[str, float]],
+        staleness_defaults: Dict[str, Dict[str, int]],
+        now: float,
+    ) -> None:
+        """Emit exactly one log line on a signal_quality transition.
+
+        Seeding (first observation) does not log. Repeat readings do not log.
+        Good transitions are INFO; stale/unavailable transitions are WARNING.
+        """
+        previous = self._previous_signal_quality.get(sq_key)
+        if previous is None:
+            self._previous_signal_quality[sq_key] = new_quality
+            return
+        if previous == new_quality:
+            return
+
+        thresholds = staleness_defaults.get(
+            mapping.category, staleness_defaults["default"]
+        )
+        value_entry = cache.get(mapping.topic)
+        age_s: Optional[float] = (now - value_entry[1]) if value_entry else None
+        age_str = f"{age_s:.0f}s" if age_s is not None else "never"
+
+        level = logging.INFO if new_quality == "good" else logging.WARNING
+        logger.log(
+            level,
+            "MQTT signal_quality %s: %s → %s "
+            "(topic=%s category=%s age=%s fresh=%ds unavailable=%ds)",
+            sq_key,
+            previous,
+            new_quality,
+            mapping.topic,
+            mapping.category,
+            age_str,
+            thresholds["fresh"],
+            thresholds["unavailable"],
+        )
+        self._previous_signal_quality[sq_key] = new_quality
+
     def read_inputs(self, config: Dict) -> InputBlock:
         """Build InputBlock from MQTT topic cache."""
         now = time.time()
@@ -320,6 +368,14 @@ class MQTTDriver:
                     signal_quality[sq_key] = quality
                 elif mapping.field.startswith("_shadow_"):
                     signal_quality[sq_key] = quality
+
+                # Emit transition log exactly once per good↔stale↔unavailable
+                # change for tracked sq_keys. Untracked fields (outside the
+                # elif chain above) skip logging too. See INSTRUCTION-100.
+                if sq_key in signal_quality:
+                    self._log_signal_quality_transition(
+                        sq_key, mapping, quality, cache, staleness_defaults, now
+                    )
 
                 # Availability-online with no value payload yet → no parsing.
                 if payload_str is None:

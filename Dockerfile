@@ -54,6 +54,7 @@ WORKDIR /app
 # Both arches' .so coexist in qsh/ after release-sync.sh (66B).
 # Arch selection happens in the next RUN step, not at COPY time.
 COPY qsh/ /app/qsh/
+COPY config.json /app/config.json
 
 # Per-arch .so pruning: delete every .so that does not match TARGETARCH.
 # The nested package layout (qsh/pipeline/, qsh/occupancy/, etc.) means
