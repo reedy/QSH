@@ -201,6 +201,24 @@ def set_comfort_temp(body: ComfortTempBody):
     except Exception as e:
         logger.warning("Failed to persist comfort_temp: %s", e)
 
+    # Keep pid_target_internal in sync for MQTT driver fallback (INSTRUCTION-105).
+    # The MQTT driver's _resolve_mqtt_control() reads control/comfort_temp from
+    # the broker cache and falls back to config["pid_target_internal"].  Without
+    # this, a restart before the broker re-populates the retained topic reverts
+    # comfort to the default (20.0).
+    if config is not None:
+        config["pid_target_internal"] = body.value
+    try:
+        _read_modify_write(_update_config_key("pid_target_internal", body.value))
+    except Exception as e:
+        logger.warning("Failed to persist pid_target_internal: %s", e)
+
+    # Write the retained MQTT topic the driver actually reads.  Note the key
+    # must be "comfort_temp" — the topic suffix the MQTT driver subscribes to
+    # (control/comfort_temp).  Publishing to control/pid_target achieves
+    # nothing because the driver does not read that topic.
+    _mqtt_writeback("comfort_temp", str(body.value))
+
     # Keep setpoint snapshot in sync (INSTRUCTION-42A)
     try:
         from ...drivers.ha.sensor_fetcher import update_setpoint_original

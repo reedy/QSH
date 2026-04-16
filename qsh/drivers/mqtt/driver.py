@@ -157,6 +157,12 @@ class MQTTDriver:
         # (no log emitted for the seed); transitions thereafter log exactly once.
         self._previous_signal_quality: Dict[str, str] = {}
 
+        # One-shot latch for the comfort_temp startup audit log.  See
+        # INSTRUCTION-105 — makes it trivially auditable on restart whether
+        # the resolved comfort temp came from the MQTT cache or the internal
+        # fallback (pid_target_internal).
+        self._comfort_startup_logged: bool = False
+
         rooms = config.get("rooms", {})
         if not rooms:
             raise ValueError("MQTTDriver: config['rooms'] is empty — need at least one room")
@@ -523,6 +529,16 @@ class MQTTDriver:
             validate=lambda s: _validate_range(s, 10.0, 30.0),
         )
         self._last_resolved["comfort_temp"] = comfort_temp_rv
+
+        # One-time startup audit (INSTRUCTION-105).  If source="internal" and
+        # value is 20.0 when the user set something else, the persistence bug
+        # is still present.
+        if not self._comfort_startup_logged:
+            logger.info(
+                "MQTT comfort_temp startup: %.1f°C (source=%s, internal_key=pid_target_internal)",
+                comfort_temp_rv.value, comfort_temp_rv.source,
+            )
+            self._comfort_startup_logged = True
 
         # ── Per-room away and comfort_temp from control topics ──
         per_zone_away: Dict[str, float] = {}
