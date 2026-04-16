@@ -93,7 +93,7 @@ export function OccupancyTimeline({ roomHistory, hours }: OccupancyTimelineProps
                         // title attributes, and this value is now consumed only by
                         // screen readers. The visible tooltip is driven by React state.
                         title={`${displayName} — ${seg.state} ${range_str}`}
-                        className="h-full min-w-[1px] cursor-help"
+                        className="h-full min-w-[1px] cursor-default"
                         onMouseEnter={(e) => {
                           // Capture xPct synchronously — e.currentTarget is valid here because
                           // we are inside the event handler. Passing a plain object (not an
